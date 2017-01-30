@@ -459,11 +459,10 @@ public class VectorCallViewActivity extends Activity implements SensorEventListe
     }
 
     /**
-     * Insert the callView in the activity (above the other room member).
-     * The callView is setup in the SDK, and provided via dispatchOnViewLoading() in {@link #mListener}.
+     * Insert the other members call.
      */
-    private void insertCallView() {
-        if(null != mCallView) {
+    private void insertOtherMembersAvatar() {
+        if (null != mCall) {
             // set the avatar
             ImageView avatarView = (ImageView) VectorCallViewActivity.this.findViewById(R.id.call_other_member);
 
@@ -474,23 +473,37 @@ public class VectorCallViewActivity extends Activity implements SensorEventListe
 
             int side = Math.min(size.x, size.y) / 2;
 
-            RelativeLayout.LayoutParams avatarLayoutParams = (RelativeLayout.LayoutParams)avatarView.getLayoutParams();
+            RelativeLayout.LayoutParams avatarLayoutParams = (RelativeLayout.LayoutParams) avatarView.getLayoutParams();
             avatarLayoutParams.height = side;
             avatarLayoutParams.width = side;
 
             avatarView.setLayoutParams(avatarLayoutParams);
 
             VectorUtils.loadCallAvatar(this, mSession, avatarView, mCall.getRoom());
+        }
+    }
 
+    /**
+     * Insert the callView in the activity (above the other room member).
+     * The callView is setup in the SDK, and provided via dispatchOnViewLoading() in {@link #mListener}.
+     */
+    private void insertCallView() {
+        if (null != mCallView) {
             // insert the call view above the avatar
             RelativeLayout layout = (RelativeLayout)findViewById(R.id.call_layout);
             RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.MATCH_PARENT, RelativeLayout.LayoutParams.MATCH_PARENT);
             params.addRule(RelativeLayout.CENTER_IN_PARENT, RelativeLayout.TRUE);
             layout.removeView(mCallView);
-            layout.addView(mCallView, 1, params);
 
-            // init as GONE, will be displayed according to call states..
-            mCall.setVisibility(View.GONE);
+            // Insert the call view only in video call case.
+            // On some devices, mCallView is not hidden even with visibility set to View.GONE.
+            if (mCall.isVideo()) {
+                // insert it
+                layout.addView(mCallView, 1, params);
+
+                // init as GONE, will be displayed according to call states..
+                mCall.setVisibility(View.GONE);
+            }
         }
     }
 
@@ -646,6 +659,8 @@ public class VectorCallViewActivity extends Activity implements SensorEventListe
             // mic default value: enabled
             audioManager.setMicrophoneMute(false);
         }
+
+        insertOtherMembersAvatar();
 
         // init call UI setting buttons
         manageSubViews();
@@ -915,7 +930,6 @@ public class VectorCallViewActivity extends Activity implements SensorEventListe
 
             // restore the backlight management
             initBackLightManagement();
-
         } else {
             this.finish();
         }
@@ -1206,6 +1220,36 @@ public class VectorCallViewActivity extends Activity implements SensorEventListe
     }
 
     /**
+     * Refresh mCallView visibility
+     */
+    private void refreshCallViewVisibility() {
+        if ((null != mCall) && (null != mCallView)) {
+            int visibility = View.GONE;
+
+            // call view visibility management
+            if (mCall.isVideo()) {
+                String callState = mCall.getCallState();
+
+                switch (callState) {
+                    case IMXCall.CALL_STATE_WAIT_CREATE_OFFER:
+                    case IMXCall.CALL_STATE_INVITE_SENT:
+                    case IMXCall.CALL_STATE_RINGING:
+                    case IMXCall.CALL_STATE_CREATE_ANSWER:
+                    case IMXCall.CALL_STATE_CONNECTING:
+                    case IMXCall.CALL_STATE_CONNECTED:
+                        visibility = View.VISIBLE;
+                        break;
+                    default:
+                        visibility = View.GONE;
+                        break;
+                }
+            }
+
+            mCallView.setVisibility(visibility);
+        }
+    }
+
+    /**
      * Manage the UI according to call state.
      */
     private void manageSubViews() {
@@ -1254,28 +1298,8 @@ public class VectorCallViewActivity extends Activity implements SensorEventListe
             }
         }
 
-        // callview visibility management
-        if (mCall.isVideo() && !callState.equals(IMXCall.CALL_STATE_ENDED)) {
-            int visibility;
-
-            switch (callState) {
-                case IMXCall.CALL_STATE_WAIT_CREATE_OFFER:
-                case IMXCall.CALL_STATE_INVITE_SENT:
-                case IMXCall.CALL_STATE_RINGING:
-                case IMXCall.CALL_STATE_CREATE_ANSWER:
-                case IMXCall.CALL_STATE_CONNECTING:
-                case IMXCall.CALL_STATE_CONNECTED:
-                    visibility = View.VISIBLE;
-                    break;
-                default:
-                    visibility = View.GONE;
-                    break;
-            }
-
-            if ((null != mCall) && (visibility != mCall.getVisibility())) {
-                mCall.setVisibility(visibility);
-            }
-        }
+        // call view visibility management
+        refreshCallViewVisibility();
 
         // ringing management
         switch (callState) {
@@ -1318,14 +1342,16 @@ public class VectorCallViewActivity extends Activity implements SensorEventListe
     }
 
     private void saveCallView() {
-        if ((null != mCall) && !mCall.getCallState().equals(IMXCall.CALL_STATE_ENDED) && (null != mCallView) && (null != mCallView.getParent())) {
-
+        if ((null != mCall) && !mCall.getCallState().equals(IMXCall.CALL_STATE_ENDED) && (null != mCallView)) {
             // warn the call that the activity is going to be paused.
             // as the rendering is DSA, it saves time to close the activity while removing mCallView
             mCall.onPause();
 
             ViewGroup parent = (ViewGroup) mCallView.getParent();
-            parent.removeView(mCallView);
+            if (null != parent) {
+                parent.removeView(mCallView);
+            }
+
             mSavedCallView = mCallView;
 
             mSavedLocalVideoLayoutConfig = mLocalVideoLayoutConfig;
@@ -1440,6 +1466,8 @@ public class VectorCallViewActivity extends Activity implements SensorEventListe
             if (null != mWakeLock) {
                 mWakeLock.release();
             }
+
+            mIsScreenOff  = false;
         } catch (Exception e) {
             Log.e(LOG_TAG, "## turnScreenOn() failed");
         }
